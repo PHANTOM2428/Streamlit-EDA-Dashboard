@@ -1,50 +1,48 @@
 import pandas as pd
-import streamlit as st
+from typing import List, Optional
 
 
-def get_filter_options(df, column):
-    return sorted(df[column].unique())
+class DataFilter:
+    @staticmethod
+    def filter_by_date(
+        df: pd.DataFrame,
+        start_date,
+        end_date,
+        date_column: str = "Order Date"
+    ) -> pd.DataFrame:
+        mask = (df[date_column] >= start_date) & (df[date_column] <= end_date)
+        return df[mask].copy()
 
+    @staticmethod
+    def filter_by_column(
+        df: pd.DataFrame,
+        column: str,
+        values: Optional[List]
+    ) -> pd.DataFrame:
+        if not values:
+            return df.copy()
+        return df[df[column].isin(values)].copy()
 
-def apply_hierarchical_filters(df):
-    st.sidebar.header("Choose your filter: ")
-    
-    filtered_df = df.copy()
-    
-    region = st.sidebar.multiselect("Pick your Region", get_filter_options(filtered_df, "Region"))
-    if region:
-        filtered_df = filtered_df[filtered_df["Region"].isin(region)]
-    
-    state = st.sidebar.multiselect("Pick the State", get_filter_options(filtered_df, "State"))
-    if state:
-        filtered_df = filtered_df[filtered_df["State"].isin(state)]
-    
-    city = st.sidebar.multiselect("Pick the City", get_filter_options(filtered_df, "City"))
-    if city:
-        filtered_df = filtered_df[filtered_df["City"].isin(city)]
-    
-    return filtered_df
+    @staticmethod
+    def apply_cascading_filters(
+        df: pd.DataFrame,
+        region: Optional[List] = None,
+        state: Optional[List] = None,
+        city: Optional[List] = None
+    ) -> pd.DataFrame:
+        result = df.copy()
 
+        if region:
+            result = result[result["Region"].isin(region)]
 
-def aggregate_by_category(df):
-    return df.groupby(by=["Category"], as_index=False)["Sales"].sum()
+        if state:
+            result = result[result["State"].isin(state)]
 
+        if city:
+            result = result[result["City"].isin(city)]
 
-def aggregate_by_region(df):
-    return df.groupby(by="Region", as_index=False)["Sales"].sum()
+        return result
 
-
-def create_timeseries_data(df):
-    df["month_year"] = df["Order Date"].dt.to_period("M")
-    timeseries_df = pd.DataFrame(
-        df.groupby(df["month_year"].dt.strftime("%Y : %b"))["Sales"].sum()
-    ).reset_index()
-    return timeseries_df
-
-
-def create_monthly_subcategory_pivot(df):
-    df["month"] = df["Order Date"].dt.month_name()
-    month_order = ["January", "February", "March", "April", "May", "June", 
-                   "July", "August", "September", "October", "November", "December"]
-    pivot = pd.pivot_table(data=df, values="Sales", index=["Sub-Category"], columns="month")
-    return pivot.reindex(columns=[m for m in month_order if m in pivot.columns])
+    @staticmethod
+    def get_unique_values(df: pd.DataFrame, column: str) -> List:
+        return list(df[column].unique())

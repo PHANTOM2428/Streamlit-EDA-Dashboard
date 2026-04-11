@@ -1,29 +1,36 @@
 import pandas as pd
 import streamlit as st
-import os
+from typing import Optional
 
 
-def load_data(uploaded_file=None):
-    if uploaded_file is not None:
+class DataLoader:
+    DEFAULT_ENCODING = "ISO-8859-1"
+    DEFAULT_FILE = "Superstore.csv"
+
+    @staticmethod
+    def load_data(uploaded_file) -> pd.DataFrame:
+        if uploaded_file is not None:
+            return DataLoader._load_from_upload(uploaded_file)
+        return DataLoader._load_default()
+
+    @staticmethod
+    def _load_from_upload(uploaded_file) -> pd.DataFrame:
         filename = uploaded_file.name
         st.write(filename)
-        return pd.read_csv(uploaded_file, encoding="ISO-8859-1")
-    
-    current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    default_data_path = os.path.join(current_dir, "Superstore.csv")
-    return pd.read_csv(default_data_path, encoding="ISO-8859-1")
+        return pd.read_csv(filename, encoding=DataLoader.DEFAULT_ENCODING)
 
+    @staticmethod
+    def _load_default() -> pd.DataFrame:
+        return pd.read_csv(DataLoader.DEFAULT_FILE, encoding=DataLoader.DEFAULT_ENCODING)
 
-def process_dates(df):
-    df["Order Date"] = pd.to_datetime(df["Order Date"])
-    return df
+    @staticmethod
+    def parse_dates(df: pd.DataFrame, date_column: str = "Order Date") -> pd.DataFrame:
+        df = df.copy()
+        df[date_column] = pd.to_datetime(df[date_column])
+        return df
 
-
-def get_date_range(df):
-    min_date = df["Order Date"].min()
-    max_date = df["Order Date"].max()
-    return min_date, max_date
-
-
-def filter_by_date(df, start_date, end_date):
-    return df[(df["Order Date"] >= start_date) & (df["Order Date"] <= end_date)].copy()
+    @staticmethod
+    def get_date_range(df: pd.DataFrame, date_column: str = "Order Date") -> tuple:
+        min_date = pd.to_datetime(df[date_column]).min()
+        max_date = pd.to_datetime(df[date_column]).max()
+        return min_date, max_date

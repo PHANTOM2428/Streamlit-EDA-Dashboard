@@ -1,319 +1,165 @@
 import warnings
 import streamlit as st
+import pandas as pd
+
+from src.data import DataLoader, DataFilter, DataProcessor
+from src.charts import ChartGenerator
+from src.components import UIComponents
 
 warnings.filterwarnings('ignore')
 
-from src.data import (
-    load_data,
-    process_dates,
-    filter_by_date,
-    apply_hierarchical_filters,
-    aggregate_by_category,
-    aggregate_by_region,
-    create_timeseries_data,
-    create_monthly_subcategory_pivot
-)
-from src.charts import (
-    create_bar_chart,
-    create_pie_chart,
-    create_line_chart,
-    create_treemap,
-    create_scatter_plot,
-    create_table
-)
-from src.components import (
-    render_page_config,
-    render_file_uploader,
-    render_date_filters,
-    render_expander_data_download
-)
-
 
 def main():
-    render_page_config()
-    
-    uploaded_file = render_file_uploader()
-    df = load_data(uploaded_file)
-    df = process_dates(df)
-    
-    start_date, end_date = render_date_filters(df)
-    df = filter_by_date(df, start_date, end_date)
-    
-    filtered_df = apply_hierarchical_filters(df)
-    
-    category_df = aggregate_by_category(filtered_df)
-    
-    col1, col2 = st.columns(2)
-    
+    UIComponents.render_page_config()
+    UIComponents.render_title()
+
+    uploaded_file = UIComponents.render_file_uploader()
+    df = DataLoader.load_data(uploaded_file)
+    df = DataLoader.parse_dates(df)
+
+    min_date, max_date = DataLoader.get_date_range(df)
+    date1, date2, col1, col2 = UIComponents.render_date_inputs(min_date, max_date)
+
+    df = DataFilter.filter_by_date(df, date1, date2)
+
+    region, state, city = UIComponents.render_sidebar_filters(df)
+    filtered_df = DataFilter.apply_cascading_filters(df, region, state, city)
+
+    render_category_and_region_charts(filtered_df, col1, col2)
+    render_time_series_analysis(filtered_df)
+    render_treemap(filtered_df)
+    render_segment_and_category_pies(filtered_df)
+    render_summary_table(filtered_df, df)
+    render_scatter_plot(filtered_df)
+
+
+def render_category_and_region_charts(filtered_df: pd.DataFrame, col1, col2):
+    category_df = DataProcessor.group_by_column(filtered_df, "Category")
+
     with col1:
-        st.subheader("Category wise Sales")
-        fig_bar = create_bar_chart(category_df, x="Category", y="Sales")
-        st.plotly_chart(fig_bar, use_container_width=True)
-    
+        UIComponents.render_subheader("Category wise Sales")
+        fig_bar = ChartGenerator.create_bar_chart(
+            df=category_df,
+            x="Category",
+            y="Sales"
+        )
+        UIComponents.render_plotly_chart(fig_bar)
+
     with col2:
-        st.subheader("Region wise Sales")
-        fig_pie = create_pie_chart(filtered_df, values="Sales", names="Region")
-        st.plotly_chart(fig_pie, use_container_width=True)
-    
-    cl1, cl2 = st.columns(2)
+        UIComponents.render_subheader("Region wise Sales")
+        fig_pie = ChartGenerator.create_pie_chart(
+            df=filtered_df,
+            values="Sales",
+            names="Region"
+        )
+        UIComponents.render_plotly_chart(fig_pie)
+
+    cl1, cl2 = st.columns((2))
     with cl1:
-        render_expander_data_download("Category_ViewData", category_df, "Category", "Blues")
-    
+        UIComponents.render_expander_data(
+            "Category_ViewData",
+            category_df,
+            gradient_cmap="Blues",
+            download_filename="Category.csv"
+        )
+
     with cl2:
-        region_df = aggregate_by_region(filtered_df)
-        render_expander_data_download("Region_ViewData", region_df, "Region", "Oranges")
-    
-    st.subheader('Time Series Analysis')
-    linechart_df = create_timeseries_data(filtered_df)
-    fig2 = create_line_chart(linechart_df, x="month_year", y="Sales", labels={"Sales": "Amount"})
-    st.plotly_chart(fig2, use_container_width=True)
-    
-    with st.expander("View Data of TimeSeries:"):
-        st.write(linechart_df.T.style.background_gradient(cmap="Blues"))
-        csv = linechart_df.to_csv(index=False).encode("utf-8")
-        st.download_button('Download Data', data=csv, file_name="TimeSeries.csv", mime='text/csv')
-    
-    st.subheader("Hierarchical view of Sales using TreeMap")
-    fig3 = create_treemap(
-        filtered_df,
+        region_df = DataProcessor.group_by_column(filtered_df, "Region")
+        UIComponents.render_expander_data(
+            "Region_ViewData",
+            region_df,
+            gradient_cmap="Oranges",
+            download_filename="Region.csv"
+        )
+
+
+def render_time_series_analysis(filtered_df: pd.DataFrame):
+    filtered_df = DataProcessor.add_month_year_column(filtered_df)
+    UIComponents.render_subheader('Time Series Analysis')
+
+    linechart = DataProcessor.aggregate_by_month(filtered_df)
+    fig = ChartGenerator.create_line_chart(
+        df=linechart,
+        x="month_year",
+        y="Sales",
+        labels={"Sales": "Amount"}
+    )
+    UIComponents.render_plotly_chart(fig)
+
+    UIComponents.render_expander_table(
+        "View Data of TimeSeries:",
+        linechart
+    )
+
+
+def render_treemap(filtered_df: pd.DataFrame):
+    UIComponents.render_subheader("Hierarchical view of Sales using TreeMap")
+    fig = ChartGenerator.create_treemap(
+        df=filtered_df,
         path=["Region", "Category", "Sub-Category"],
         values="Sales",
         hover_data=["Sales"],
         color="Sub-Category"
     )
-    st.plotly_chart(fig3, use_container_width=True)
-    
-    chart1, chart2 = st.columns(2)
+    UIComponents.render_plotly_chart(fig)
+
+
+def render_segment_and_category_pies(filtered_df: pd.DataFrame):
+    chart1, chart2 = st.columns((2))
+
     with chart1:
-        st.subheader('Segment wise Sales')
-        fig = create_pie_chart(
-            filtered_df,
+        UIComponents.render_subheader('Segment wise Sales')
+        fig = ChartGenerator.create_pie_chart_inside(
+            df=filtered_df,
             values="Sales",
             names="Segment",
-            template="plotly_dark",
-            textposition="inside"
+            template="plotly_dark"
         )
-        fig.update_traces(text=filtered_df["Segment"])
-        st.plotly_chart(fig, use_container_width=True)
-    
+        UIComponents.render_plotly_chart(fig)
+
     with chart2:
-        st.subheader('Category wise Sales')
-        fig = create_pie_chart(
-            filtered_df,
+        UIComponents.render_subheader('Category wise Sales')
+        fig = ChartGenerator.create_pie_chart_inside(
+            df=filtered_df,
             values="Sales",
             names="Category",
-            template="gridon",
-            textposition="inside"
+            template="gridon"
         )
-        fig.update_traces(text=filtered_df["Category"])
-        st.plotly_chart(fig, use_container_width=True)
-    
-    st.subheader(":point_right: Month wise Sub-Category Sales Summary")
+        UIComponents.render_plotly_chart(fig)
+
+
+def render_summary_table(filtered_df: pd.DataFrame, original_df: pd.DataFrame):
+    UIComponents.render_subheader(":point_right: Month wise Sub-Category Sales Summary")
+
     with st.expander("Summary_Table"):
-        df_sample = df[0:5][["Region", "State", "City", "Category", "Sales", "Profit", "Quantity"]]
-        fig = create_table(df_sample, colorscale="Cividis")
-        st.plotly_chart(fig, use_container_width=True)
-        
-        st.markdown("Month wise sub-Category Table")
-        sub_category_pivot = create_monthly_subcategory_pivot(filtered_df)
+        sample_columns = ["Region", "State", "City", "Category", "Sales", "Profit", "Quantity"]
+        df_sample = DataProcessor.get_sample(original_df, sample_columns, n=5)
+        fig = ChartGenerator.create_table(df_sample, colorscale="Cividis")
+        UIComponents.render_plotly_chart(fig)
+
+        UIComponents.render_markdown("Month wise sub-Category Table")
+        filtered_df = DataProcessor.add_month_name_column(filtered_df)
+        sub_category_pivot = DataProcessor.create_pivot_table(
+            df=filtered_df,
+            values="Sales",
+            index=["Sub-Category"],
+            columns="month"
+        )
         st.write(sub_category_pivot.style.background_gradient(cmap="Blues"))
-    
-    data1 = create_scatter_plot(
-        filtered_df,
+
+
+def render_scatter_plot(filtered_df: pd.DataFrame):
+    fig = ChartGenerator.create_scatter_plot(
+        df=filtered_df,
         x="Sales",
         y="Profit",
         size="Quantity",
-        title="Relationship between Sales and Profit using Scatter Plot"
+        title="Relationship between Sales and Profit using Scatter Plot",
+        xaxis_title="Sales",
+        yaxis_title="Profit"
     )
-    st.plotly_chart(data1, use_container_width=True)
+    UIComponents.render_plotly_chart(fig)
 
 
 if __name__ == "__main__":
     main()
-import streamlit as st
-import plotly.express as px
-import pandas as pd
-import os
-import warnings
-warnings.filterwarnings('ignore')
-st.set_page_config(page_title="Superstore!!!", page_icon=":bar_chart:",layout="wide")
-st.title(" :bar_chart: Sample SuperStore EDA")
-
-# Uploading data to streamlit 
-
-fl = st.file_uploader(":file_folder: Upload a file",type=(["csv","txt","xlsx","xls"]))
-if fl is not None:
-    filename = fl.name
-    st.write(filename)
-    df = pd.read_csv(filename, encoding = "ISO-8859-1")
-else:
-    os.chdir(r"C:\code\Streamlit")
-    df = pd.read_csv("Superstore.csv", encoding = "ISO-8859-1")
-
-# Setting the dates
-
-col1, col2 = st.columns((2))
-df["Order Date"] = pd.to_datetime(df["Order Date"])
-
-# Getting the min and max date 
-startDate = pd.to_datetime(df["Order Date"]).min()
-endDate = pd.to_datetime(df["Order Date"]).max()
-
-with col1:
-    date1 = pd.to_datetime(st.date_input("Start Date", startDate))
-
-with col2:
-    date2 = pd.to_datetime(st.date_input("End Date", endDate))
-
-df = df[(df["Order Date"] >= date1) & (df["Order Date"] <= date2)].copy()
-
-# Create for Region
-
-st.sidebar.header("Choose your filter: ")
-region = st.sidebar.multiselect("Pick your Region", df["Region"].unique())
-if not region:
-    df2 = df.copy()
-else:
-    df2 = df[df["Region"].isin(region)]
-
-# Create for State
-state = st.sidebar.multiselect("Pick the State", df2["State"].unique())
-if not state:
-    df3 = df2.copy()
-else:
-    df3 = df2[df2["State"].isin(state)]
-
-# Create for City
-city = st.sidebar.multiselect("Pick the City",df3["City"].unique())
-
-# Filter the data based on Region, State and City
-
-if not region and not state and not city:
-    filtered_df = df
-elif not state and not city:
-    filtered_df = df[df["Region"].isin(region)]
-elif not region and not city:
-    filtered_df = df[df["State"].isin(state)]
-elif state and city:
-    filtered_df = df3[df["State"].isin(state) & df3["City"].isin(city)]
-elif region and city:
-    filtered_df = df3[df["Region"].isin(region) & df3["City"].isin(city)]
-elif region and state:
-    filtered_df = df3[df["Region"].isin(region) & df3["State"].isin(state)]
-elif city:
-    filtered_df = df3[df3["City"].isin(city)]
-else:
-    filtered_df = df3[df3["Region"].isin(region) & df3["State"].isin(state) & df3["City"].isin(city)]
-
-category_df = filtered_df.groupby(by = ["Category"], as_index = False)["Sales"].sum()
-
-#chart creation
-
-with col1:
-    st.subheader("Category wise Sales")
-    fig_bar = px.bar(
-        category_df,
-        x="Category",
-        y="Sales",
-        text=['${:,.2f}'.format(x) for x in category_df["Sales"]],
-        template="seaborn"
-    )
-    fig_bar.update_layout(height=350)
-    st.plotly_chart(fig_bar, use_container_width=True)
-
-with col2:
-    st.subheader("Region wise Sales")
-    fig_pie = px.pie(
-        filtered_df,
-        values="Sales",
-        names="Region",
-        hole=0.5
-    )
-    fig_pie.update_layout(height=350)
-    fig_pie.update_traces(textposition="outside")
-    st.plotly_chart(fig_pie, use_container_width=True)
-
-#Download The data
-
-cl1, cl2 = st.columns((2))
-with cl1:
-    with st.expander("Category_ViewData"):
-        st.write(category_df.style.background_gradient(cmap="Blues"))
-        csv = category_df.to_csv(index = False).encode('utf-8')
-        st.download_button("Download Data", data = csv, file_name = "Category.csv", mime = "text/csv",
-                            help = 'Click here to download the data as a CSV file')
-
-with cl2:
-    with st.expander("Region_ViewData"):
-        region = filtered_df.groupby(by = "Region", as_index = False)["Sales"].sum()
-        st.write(region.style.background_gradient(cmap="Oranges"))
-        csv = region.to_csv(index = False).encode('utf-8')
-        st.download_button("Download Data", data = csv, file_name = "Region.csv", mime = "text/csv",
-                        help = 'Click here to download the data as a CSV file')
-        
-#Time series analysis
-
-filtered_df["month_year"] = filtered_df["Order Date"].dt.to_period("M")
-st.subheader('Time Series Analysis')
-
-linechart = pd.DataFrame(filtered_df.groupby(filtered_df["month_year"].dt.strftime("%Y : %b"))["Sales"].sum()).reset_index()
-fig2 = px.line(linechart, x = "month_year", y="Sales", labels = {"Sales": "Amount"},height=500, width = 1000,template="gridon")
-st.plotly_chart(fig2,use_container_width=True)
-
-with st.expander("View Data of TimeSeries:"):
-    st.write(linechart.T.style.background_gradient(cmap="Blues"))
-    csv = linechart.to_csv(index=False).encode("utf-8")
-    st.download_button('Download Data', data = csv, file_name = "TimeSeries.csv", mime ='text/csv')
-
-# Create a treem based on Region, category, sub-Category
-st.subheader("Hierarchical view of Sales using TreeMap")
-fig3 = px.treemap(filtered_df, path = ["Region","Category","Sub-Category"], values = "Sales",hover_data = ["Sales"],
-                  color = "Sub-Category")
-fig3.update_layout(width = 800, height = 650)
-st.plotly_chart(fig3, use_container_width=True)
-
-chart1, chart2 = st.columns((2))
-with chart1:
-    st.subheader('Segment wise Sales')
-    fig = px.pie(filtered_df, values = "Sales", names = "Segment", template = "plotly_dark")
-    fig.update_traces(text = filtered_df["Segment"], textposition = "inside")
-    st.plotly_chart(fig,use_container_width=True)
-
-with chart2:
-    st.subheader('Category wise Sales')
-    fig = px.pie(filtered_df, values = "Sales", names = "Category", template = "gridon")
-    fig.update_traces(text = filtered_df["Category"], textposition = "inside")
-    st.plotly_chart(fig,use_container_width=True)
-
-import plotly.figure_factory as ff
-st.subheader(":point_right: Month wise Sub-Category Sales Summary")
-with st.expander("Summary_Table"):
-    df_sample = df[0:5][["Region","State","City","Category","Sales","Profit","Quantity"]]
-    fig = ff.create_table(df_sample, colorscale = "Cividis")
-    st.plotly_chart(fig, use_container_width=True)
-
-    st.markdown("Month wise sub-Category Table")
-    filtered_df["month"] = filtered_df["Order Date"].dt.month_name()
-    sub_category_Year = pd.pivot_table(data = filtered_df, values = "Sales", index = ["Sub-Category"],columns = "month")
-    st.write(sub_category_Year.style.background_gradient(cmap="Blues"))
-
-# Create a scatter plot
-data1 = px.scatter(
-    filtered_df,
-    x="Sales",
-    y="Profit",
-    size="Quantity"
-)
-
-data1.update_layout(
-    title={
-        "text": "Relationship between Sales and Profit using Scatter Plot",
-        "font": {"size": 20}
-    },
-    xaxis_title="Sales",
-    yaxis_title="Profit",
-    xaxis_title_font={"size": 19},
-    yaxis_title_font={"size": 19}
-)
-
-st.plotly_chart(data1, use_container_width=True)
