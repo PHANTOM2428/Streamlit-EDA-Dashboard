@@ -1,69 +1,111 @@
+"""
+数据处理模块 - 负责数据聚合、分组和转换
+"""
 import pandas as pd
 from typing import List, Optional
+from src.utils.constants import COLUMNS, DATE_COLUMN
 
 
 class DataProcessor:
-    @staticmethod
-    def group_by_column(
-        df: pd.DataFrame,
-        group_column: str,
-        agg_column: str = "Sales",
-        agg_func: str = "sum"
-    ) -> pd.DataFrame:
-        return df.groupby(by=[group_column], as_index=False)[agg_column].agg(agg_func)
-
-    @staticmethod
-    def group_by_multiple(
-        df: pd.DataFrame,
-        group_columns: List[str],
-        agg_column: str = "Sales",
-        agg_func: str = "sum"
-    ) -> pd.DataFrame:
-        return df.groupby(by=group_columns, as_index=False)[agg_column].agg(agg_func)
-
-    @staticmethod
-    def add_month_year_column(
-        df: pd.DataFrame,
-        date_column: str = "Order Date"
-    ) -> pd.DataFrame:
-        df = df.copy()
-        df["month_year"] = df[date_column].dt.to_period("M")
-        return df
-
-    @staticmethod
-    def add_month_name_column(
-        df: pd.DataFrame,
-        date_column: str = "Order Date"
-    ) -> pd.DataFrame:
-        df = df.copy()
-        df["month"] = df[date_column].dt.month_name()
-        return df
-
-    @staticmethod
-    def aggregate_by_month(
-        df: pd.DataFrame,
-        date_column: str = "Order Date",
-        agg_column: str = "Sales"
-    ) -> pd.DataFrame:
-        df = df.copy()
-        df["month_year"] = df[date_column].dt.to_period("M")
-        result = df.groupby(df["month_year"].dt.strftime("%Y : %b"))[agg_column].sum()
-        return pd.DataFrame(result).reset_index()
-
-    @staticmethod
-    def create_pivot_table(
-        df: pd.DataFrame,
-        values: str,
-        index: List[str],
-        columns: str
-    ) -> pd.DataFrame:
-        return pd.pivot_table(
-            data=df,
-            values=values,
-            index=index,
-            columns=columns
+    """数据处理器类 - 处理数据聚合和转换"""
+    
+    def __init__(self, df: pd.DataFrame):
+        self.df = df.copy()
+    
+    def group_by_category(self) -> pd.DataFrame:
+        """
+        按类别分组并汇总销售额
+        
+        Returns:
+            pd.DataFrame: 类别销售额汇总
+        """
+        return self.df.groupby(
+            by=[COLUMNS["category"]],
+            as_index=False
+        )[COLUMNS["sales"]].sum()
+    
+    def group_by_region(self) -> pd.DataFrame:
+        """
+        按地区分组并汇总销售额
+        
+        Returns:
+            pd.DataFrame: 地区销售额汇总
+        """
+        return self.df.groupby(
+            by=COLUMNS["region"],
+            as_index=False
+        )[COLUMNS["sales"]].sum()
+    
+    def get_time_series_data(self) -> pd.DataFrame:
+        """
+        获取时间序列数据（按月汇总销售额）
+        
+        Returns:
+            pd.DataFrame: 时间序列数据
+        """
+        # 创建月份年份列
+        temp_df = self.df.copy()
+        temp_df["month_year"] = temp_df[DATE_COLUMN].dt.to_period("M")
+        
+        # 按月份汇总
+        result = pd.DataFrame(
+            temp_df.groupby(
+                temp_df["month_year"].dt.strftime("%Y : %b")
+            )[COLUMNS["sales"]].sum()
+        ).reset_index()
+        
+        return result
+    
+    def get_monthly_subcategory_pivot(self) -> pd.DataFrame:
+        """
+        获取月度子类别透视表
+        
+        Returns:
+            pd.DataFrame: 透视表数据
+        """
+        temp_df = self.df.copy()
+        temp_df["month"] = temp_df[DATE_COLUMN].dt.month_name()
+        
+        pivot = pd.pivot_table(
+            data=temp_df,
+            values=COLUMNS["sales"],
+            index=[COLUMNS["sub_category"]],
+            columns="month"
         )
+        return pivot
+    
+    def get_summary_sample(self, columns: Optional[List[str]] = None, n_rows: int = 5) -> pd.DataFrame:
+        """
+        获取摘要数据样本
+        
+        Args:
+            columns: 要包含的列，默认使用预定义的关键列
+            n_rows: 行数
+            
+        Returns:
+            pd.DataFrame: 样本数据
+        """
+        if columns is None:
+            columns = [
+                COLUMNS["region"],
+                COLUMNS["state"],
+                COLUMNS["city"],
+                COLUMNS["category"],
+                COLUMNS["sales"],
+                COLUMNS["profit"],
+                COLUMNS["quantity"]
+            ]
+        return self.df[columns].head(n_rows)
 
-    @staticmethod
-    def get_sample(df: pd.DataFrame, columns: List[str], n: int = 5) -> pd.DataFrame:
-        return df[0:n][columns]
+
+def process_data(df: pd.DataFrame) -> DataProcessor:
+    """
+    便捷函数：创建数据处理器实例
+    
+    Args:
+        df: 原始数据
+        
+    Returns:
+        DataProcessor: 数据处理器实例
+    """
+    return DataProcessor(df)

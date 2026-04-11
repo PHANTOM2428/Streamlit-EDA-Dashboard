@@ -1,164 +1,181 @@
-import warnings
+"""
+Streamlit EDA Dashboard - 重构后的主应用入口
+
+重构说明：
+1. 将数据加载、筛选、处理逻辑分离到 src/data/ 模块
+2. 将图表生成逻辑分离到 src/charts/ 模块
+3. 将 UI 组件分离到 src/components/ 模块
+4. 常量配置集中管理于 src/utils/constants.py
+"""
 import streamlit as st
 import pandas as pd
+import warnings
 
-from src.data import DataLoader, DataFilter, DataProcessor
-from src.charts import ChartGenerator
-from src.components import UIComponents
-
+# 抑制警告
 warnings.filterwarnings('ignore')
+
+# 导入重构后的模块
+from src.utils.constants import COLUMNS, TABLE_CONFIG
+from src.data.loader import load_and_prepare_data
+from src.data.filters import create_filter
+from src.data.processor import process_data
+from src.charts.generator import create_chart_generator
+from src.components.ui import get_ui_components
 
 
 def main():
-    UIComponents.render_page_config()
-    UIComponents.render_title()
-
-    uploaded_file = UIComponents.render_file_uploader()
-    df = DataLoader.load_data(uploaded_file)
-    df = DataLoader.parse_dates(df)
-
-    min_date, max_date = DataLoader.get_date_range(df)
-    date1, date2, col1, col2 = UIComponents.render_date_inputs(min_date, max_date)
-
-    df = DataFilter.filter_by_date(df, date1, date2)
-
-    region, state, city = UIComponents.render_sidebar_filters(df)
-    filtered_df = DataFilter.apply_cascading_filters(df, region, state, city)
-
-    render_category_and_region_charts(filtered_df, col1, col2)
-    render_time_series_analysis(filtered_df)
-    render_treemap(filtered_df)
-    render_segment_and_category_pies(filtered_df)
-    render_summary_table(filtered_df, df)
-    render_scatter_plot(filtered_df)
-
-
-def render_category_and_region_charts(filtered_df: pd.DataFrame, col1, col2):
-    category_df = DataProcessor.group_by_column(filtered_df, "Category")
-
+    """主应用函数"""
+    
+    # 初始化 UI 组件
+    ui = get_ui_components()
+    
+    # 设置页面
+    ui.setup_page()
+    
+    # 文件上传
+    uploaded_file = ui.render_file_uploader()
+    
+    # 加载数据
+    df = load_and_prepare_data(uploaded_file)
+    
+    # 获取日期范围
+    start_date = df[COLUMNS["order_date"]].min()
+    end_date = df[COLUMNS["order_date"]].max()
+    
+    # 日期筛选
+    date1, date2 = ui.render_date_filters(start_date, end_date)
+    df = df[(df[COLUMNS["order_date"]] >= date1) & (df[COLUMNS["order_date"]] <= date2)].copy()
+    
+    # 初始化筛选器
+    filter_engine = create_filter(df)
+    
+    # 侧边栏筛选
+    region, state, city = ui.render_sidebar_filters(
+        available_regions=df[COLUMNS["region"]].unique(),
+        available_states=filter_engine.get_available_states(region),
+        available_cities=filter_engine.get_available_cities(region, state)
+    )
+    
+    # 应用级联筛选
+    filtered_df = filter_engine.apply_cascading_filters(region, state, city)
+    
+    # 初始化数据处理器
+    processor = process_data(filtered_df)
+    
+    # 初始化图表生成器
+    chart_gen = create_chart_generator()
+    
+    # 类别销售额数据
+    category_df = processor.group_by_category()
+    
+    # 第一行图表：类别柱状图 + 地区饼图
+    col1, col2 = st.columns((2))
+    
     with col1:
-        UIComponents.render_subheader("Category wise Sales")
-        fig_bar = ChartGenerator.create_bar_chart(
-            df=category_df,
-            x="Category",
-            y="Sales"
+        st.subheader("Category wise Sales")
+        fig_bar = chart_gen.create_bar_chart(
+            data=category_df,
+            x_column=COLUMNS["category"],
+            y_column=COLUMNS["sales"]
         )
-        UIComponents.render_plotly_chart(fig_bar)
-
+        st.plotly_chart(fig_bar, use_container_width=True)
+    
     with col2:
-        UIComponents.render_subheader("Region wise Sales")
-        fig_pie = ChartGenerator.create_pie_chart(
-            df=filtered_df,
-            values="Sales",
-            names="Region"
+        st.subheader("Region wise Sales")
+        fig_pie = chart_gen.create_pie_chart(
+            data=filtered_df,
+            values_column=COLUMNS["sales"],
+            names_column=COLUMNS["region"]
         )
-        UIComponents.render_plotly_chart(fig_pie)
-
+        st.plotly_chart(fig_pie, use_container_width=True)
+    
+    # 数据下载区域
     cl1, cl2 = st.columns((2))
+    
     with cl1:
-        UIComponents.render_expander_data(
-            "Category_ViewData",
-            category_df,
-            gradient_cmap="Blues",
+        ui.render_data_viewer(
+            data=category_df,
+            title="Category_ViewData",
+            cmap=TABLE_CONFIG["category_cmap"],
+            enable_download=True,
             download_filename="Category.csv"
         )
-
+    
     with cl2:
-        region_df = DataProcessor.group_by_column(filtered_df, "Region")
-        UIComponents.render_expander_data(
-            "Region_ViewData",
-            region_df,
-            gradient_cmap="Oranges",
+        region_df = processor.group_by_region()
+        ui.render_data_viewer(
+            data=region_df,
+            title="Region_ViewData",
+            cmap=TABLE_CONFIG["region_cmap"],
+            enable_download=True,
             download_filename="Region.csv"
         )
-
-
-def render_time_series_analysis(filtered_df: pd.DataFrame):
-    filtered_df = DataProcessor.add_month_year_column(filtered_df)
-    UIComponents.render_subheader('Time Series Analysis')
-
-    linechart = DataProcessor.aggregate_by_month(filtered_df)
-    fig = ChartGenerator.create_line_chart(
-        df=linechart,
-        x="month_year",
-        y="Sales",
-        labels={"Sales": "Amount"}
+    
+    # 时间序列分析
+    st.subheader('Time Series Analysis')
+    linechart_df = processor.get_time_series_data()
+    fig_line = chart_gen.create_line_chart(
+        data=linechart_df,
+        x_column="month_year",
+        y_column=COLUMNS["sales"]
     )
-    UIComponents.render_plotly_chart(fig)
-
-    UIComponents.render_expander_table(
-        "View Data of TimeSeries:",
-        linechart
+    st.plotly_chart(fig_line, use_container_width=True)
+    
+    # 时间序列数据下载
+    ui.render_transposed_data_viewer(
+        data=linechart_df,
+        title="View Data of TimeSeries:",
+        cmap=TABLE_CONFIG["category_cmap"],
+        download_filename="TimeSeries.csv"
     )
-
-
-def render_treemap(filtered_df: pd.DataFrame):
-    UIComponents.render_subheader("Hierarchical view of Sales using TreeMap")
-    fig = ChartGenerator.create_treemap(
-        df=filtered_df,
-        path=["Region", "Category", "Sub-Category"],
-        values="Sales",
-        hover_data=["Sales"],
-        color="Sub-Category"
+    
+    # 树状图
+    st.subheader("Hierarchical view of Sales using TreeMap")
+    fig_treemap = chart_gen.create_treemap(
+        data=filtered_df,
+        path_columns=[COLUMNS["region"], COLUMNS["category"], COLUMNS["sub_category"]],
+        values_column=COLUMNS["sales"],
+        color_column=COLUMNS["sub_category"]
     )
-    UIComponents.render_plotly_chart(fig)
-
-
-def render_segment_and_category_pies(filtered_df: pd.DataFrame):
+    st.plotly_chart(fig_treemap, use_container_width=True)
+    
+    # 第二行饼图：细分 + 类别
     chart1, chart2 = st.columns((2))
-
+    
     with chart1:
-        UIComponents.render_subheader('Segment wise Sales')
-        fig = ChartGenerator.create_pie_chart_inside(
-            df=filtered_df,
-            values="Sales",
-            names="Segment",
+        st.subheader('Segment wise Sales')
+        fig_segment = chart_gen.create_pie_chart(
+            data=filtered_df,
+            values_column=COLUMNS["sales"],
+            names_column=COLUMNS["segment"],
+            hole=0,
+            text_position="inside",
             template="plotly_dark"
         )
-        UIComponents.render_plotly_chart(fig)
-
+        fig_segment.update_traces(text=filtered_df[COLUMNS["segment"]].unique())
+        st.plotly_chart(fig_segment, use_container_width=True)
+    
     with chart2:
-        UIComponents.render_subheader('Category wise Sales')
-        fig = ChartGenerator.create_pie_chart_inside(
-            df=filtered_df,
-            values="Sales",
-            names="Category",
+        st.subheader('Category wise Sales')
+        fig_category = chart_gen.create_pie_chart(
+            data=filtered_df,
+            values_column=COLUMNS["sales"],
+            names_column=COLUMNS["category"],
+            hole=0,
+            text_position="inside",
             template="gridon"
         )
-        UIComponents.render_plotly_chart(fig)
-
-
-def render_summary_table(filtered_df: pd.DataFrame, original_df: pd.DataFrame):
-    UIComponents.render_subheader(":point_right: Month wise Sub-Category Sales Summary")
-
-    with st.expander("Summary_Table"):
-        sample_columns = ["Region", "State", "City", "Category", "Sales", "Profit", "Quantity"]
-        df_sample = DataProcessor.get_sample(original_df, sample_columns, n=5)
-        fig = ChartGenerator.create_table(df_sample, colorscale="Cividis")
-        UIComponents.render_plotly_chart(fig)
-
-        UIComponents.render_markdown("Month wise sub-Category Table")
-        filtered_df = DataProcessor.add_month_name_column(filtered_df)
-        sub_category_pivot = DataProcessor.create_pivot_table(
-            df=filtered_df,
-            values="Sales",
-            index=["Sub-Category"],
-            columns="month"
-        )
-        st.write(sub_category_pivot.style.background_gradient(cmap="Blues"))
-
-
-def render_scatter_plot(filtered_df: pd.DataFrame):
-    fig = ChartGenerator.create_scatter_plot(
-        df=filtered_df,
-        x="Sales",
-        y="Profit",
-        size="Quantity",
-        title="Relationship between Sales and Profit using Scatter Plot",
-        xaxis_title="Sales",
-        yaxis_title="Profit"
-    )
-    UIComponents.render_plotly_chart(fig)
+        fig_category.update_traces(text=filtered_df[COLUMNS["category"]].unique())
+        st.plotly_chart(fig_category, use_container_width=True)
+    
+    # 汇总表格区域
+    df_sample = processor.get_summary_sample()
+    pivot_data = processor.get_monthly_subcategory_pivot()
+    ui.render_summary_table_section(df_sample, pivot_data)
+    
+    # 散点图
+    fig_scatter = chart_gen.create_scatter_plot(filtered_df)
+    st.plotly_chart(fig_scatter, use_container_width=True)
 
 
 if __name__ == "__main__":
